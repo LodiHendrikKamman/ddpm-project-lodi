@@ -66,7 +66,7 @@ def find_lr(model, train_loader, start_lr=1e-7, end_lr=1, num_iter=100):
 
 
 def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e-4,
-          early_stopping_patience=10, save_path='model.pkl', writer=None):
+          early_stopping_patience=10, save_path='model.pkl', writer=None, use_time=True):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scaler = torch.amp.GradScaler('cuda')
@@ -83,7 +83,7 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
         epoch_train_loss = 0
         for batch in tqdm(train_loader, leave=False, desc='train'):
             x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
-                                 batch[2].to(device) if len(batch) == 3 else None,)
+                                 batch[2].to(device) if use_time and len(batch) == 3 else None,)
 
             with torch.amp.autocast('cuda'):
                 noise_pred = model(x_noisy, t)
@@ -104,7 +104,7 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
         with torch.no_grad():
             for batch in tqdm(test_loader, leave=False, desc='test'):
                 x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
-                                 batch[2].to(device) if len(batch) == 3 else None,)
+                                 batch[2].to(device) if use_time and len(batch) == 3 else None,)
                 with torch.amp.autocast('cuda'):
                     noise_pred = model(x_noisy,t)
                     epoch_test_loss += loss_fn(noise_pred, noise).item()
