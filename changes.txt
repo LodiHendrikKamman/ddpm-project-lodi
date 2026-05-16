@@ -1,0 +1,15 @@
+ATTENTION
+When calling UNet() now add parameter num_heads_att=...
+If you dont give the parameter 4 is used.
+If you dont want to use the attention layer use num_heads_att=0
+Please know that num_heads_att= must be an even number.
+Changes only effected model.py and example.py
+
+TIME EMBEDDING
+When calling UNet() now add parameters time_emb_dim=, time_emb_base_dim=
+If you dont give the parameter 128 and 32 is used
+dataset.py now returns t.squeeze(0)
+model.py: a lot of changes, old version is saved
+train.py find_lr() function has changed to accept t as parameter.
+
+

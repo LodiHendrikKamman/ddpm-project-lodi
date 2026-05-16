@@ -1,19 +1,67 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
-from torch_lr_finder import LRFinder
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def find_lr(model, train_loader, start_lr=1e-7, end_lr=1, num_iter=100):
     model = model.to(device)
+    model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
-    lr_finder = LRFinder(model, optimizer, F.mse_loss)
-    lr_finder.range_test(train_loader, end_lr=end_lr, num_iter=num_iter)
-    _, suggested_lr = lr_finder.plot(suggest_lr=True)
-    lr_finder.reset()
+    loss_fn = nn.MSELoss()
+    initial_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    lr_mult = (end_lr / start_lr) ** (1 / max(1, num_iter - 1))
+    lr = start_lr
+    lrs, losses = [], []
+    data_iter = iter(train_loader)
+
+    for _ in tqdm(range(num_iter), desc='LR finder'):
+        try:
+            batch = next(data_iter)
+        except StopIteration:
+            data_iter = iter(train_loader)
+            batch = next(data_iter)
+
+        x_noisy, noise = batch[0].to(device), batch[1].to(device)
+        t = batch[2].to(device) if len(batch) == 3 else None
+
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+
+        optimizer.zero_grad()
+        noise_pred = model(x_noisy, t)
+        loss = loss_fn(noise_pred, noise)
+
+        if not torch.isfinite(loss):
+            print(f'Stopping early: non-finite loss at lr={lr:.2e}')
+            break
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        lrs.append(lr)
+        losses.append(loss.item())
+        lr *= lr_mult
+
+    model.load_state_dict(initial_state)
+
+    if len(losses) == 0:
+        raise RuntimeError("LR finder failed before recording any losses.")
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(lrs, losses)
+    plt.xscale('log')
+    plt.xlabel('Learning rate')
+    plt.ylabel('MSE loss')
+    plt.title('LR finder')
+    plt.grid(True)
+    plt.show()
+
+    best_idx = losses.index(min(losses))
+    suggested_lr = lrs[max(0, best_idx - 1)]
     return suggested_lr
 
 
@@ -33,11 +81,14 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
     for epoch in tqdm(range(epochs), desc='Epochs'):
         model.train()
         epoch_train_loss = 0
-        for x_noisy, noise in tqdm(train_loader, leave=False, desc='train'):
-            x_noisy, noise = x_noisy.to(device), noise.to(device)
+        for batch in tqdm(train_loader, leave=False, desc='train'):
+            x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
+                                 batch[2].to(device) if len(batch) == 3 else None,)
+
             with torch.amp.autocast('cuda'):
-                noise_pred = model(x_noisy)
+                noise_pred = model(x_noisy, t)
                 loss = loss_fn(noise_pred, noise)
+
             epoch_train_loss += loss.item()
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -51,10 +102,11 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
         model.eval()
         epoch_test_loss = 0
         with torch.no_grad():
-            for x_noisy, noise in tqdm(test_loader, leave=False, desc='test'):
-                x_noisy, noise = x_noisy.to(device), noise.to(device)
+            for batch in tqdm(test_loader, leave=False, desc='test'):
+                x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
+                                 batch[2].to(device) if len(batch) == 3 else None,)
                 with torch.amp.autocast('cuda'):
-                    noise_pred = model(x_noisy)
+                    noise_pred = model(x_noisy,t)
                     epoch_test_loss += loss_fn(noise_pred, noise).item()
             test_loss = epoch_test_loss / len(test_loader)
             lr_scheduler.step(test_loss)

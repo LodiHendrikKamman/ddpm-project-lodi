@@ -21,7 +21,7 @@ class NoisyMNIST(torch.utils.data.Dataset):
             x.unsqueeze(0).to(scheduler_device),
             t.to(scheduler_device)
         )
-        return x_noisy.squeeze(0), noise.squeeze(0)
+        return x_noisy.squeeze(0), noise.squeeze(0), t.squeeze(0)
 
 
 def load_mnist(transform=None):

@@ -4,33 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SinusoidalTimeEmbedding(nn.Module):
-    def __init__(self, d=32, hidden_dim=128):
-        super().__init__()
-        assert d % 2 == 0, "Sinusoidal embedding dimension d must be even"
-        self.d = d
-        self.proj = nn.Sequential(
-            nn.Linear(d, hidden_dim),
-            nn.SiLU(),
-        )
-
-    def forward(self, t):
-        # t: (B,)
-        t = t.float()
-        device = t.device
-
-        half_dim = self.d // 2
-
-        freqs = torch.exp(
-            torch.arange(half_dim, device=device).float()
-            * -(torch.log(torch.tensor(10000.0, device=device)) / (half_dim - 1))
-        )
-
-        emb = t[:, None] * freqs[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-
-        return self.proj(emb)  # (B, hidden_dim)
-
 class SelfAtt2d(nn.Module):
     def __init__(self, channels, num_heads):
         super().__init__()
@@ -55,8 +28,7 @@ class SelfAtt2d(nn.Module):
 class UNet(nn.Module):
 
     def __init__(self, channels: List[int] = [32, 64, 128], convs_per_level=2,
-             kernel_size=3, pool_size=2, padding=1, num_heads_att=4,
-             time_emb_dim=128, time_emb_base_dim=32):
+                 kernel_size=3, pool_size=2, padding=1, num_heads_att=4):
         super().__init__()
 
         full_channels = [1] + channels + channels[-2::-1]
@@ -86,28 +58,7 @@ class UNet(nn.Module):
             for i in range(len(full_channels) - self.mid - 1)
         ])
 
-        #time embedding
-        self.time_embedding = SinusoidalTimeEmbedding(
-            d=time_emb_base_dim,
-            hidden_dim=time_emb_dim
-        )
-        self.encoder_time_projs = nn.ModuleList([
-            nn.ModuleList([
-                nn.Linear(time_emb_dim, conv.out_channels)
-                for conv in conv_block
-            ])
-            for conv_block in self.encoder_convs
-        ])
-
-        self.decoder_time_projs = nn.ModuleList([
-            nn.ModuleList([
-                nn.Linear(time_emb_dim, conv.out_channels)
-                for conv in conv_block
-            ])
-            for conv_block in self.decoder_convs
-        ])
-
-        #attention
+        #Only uses attention when the number of heads is valid.
         bottleneck_channels = full_channels[self.mid]
     
         if num_heads_att < 2:
@@ -118,8 +69,8 @@ class UNet(nn.Module):
             )
             self.attention = SelfAtt2d(bottleneck_channels, num_heads=num_heads_att)
 
-
         self.output_conv = nn.Conv2d(full_channels[-1], 1, kernel_size=1)
+
         self.pool = nn.MaxPool2d(pool_size)
         self.upsample = nn.Upsample(scale_factor=pool_size)
         self.activation_fn = F.relu
@@ -131,35 +82,15 @@ class UNet(nn.Module):
             'pool_size':       pool_size,
             'padding':         padding,
             'num_heads_att':   num_heads_att,
-            'time_emb_dim':    time_emb_dim,
-            'time_emb_base_dim': time_emb_base_dim,
         }
 
-    def forward(self, x, t=None):
-        t_emb = None if t is None else self.time_embedding(t)
-
+    def forward(self, x):
         skips = []
         last_encoder = len(self.encoder_convs) - 1
 
-        def add_encoder_time(x, i, j):
-            if t_emb is not None:
-                time_bias = self.encoder_time_projs[i][j](t_emb)
-                time_bias = time_bias[:, :, None, None]
-                x = x + time_bias
-            return x
-
-        def add_decoder_time(x, i, j):
-            if t_emb is not None:
-                time_bias = self.decoder_time_projs[i][j](t_emb)
-                time_bias = time_bias[:, :, None, None]
-                x =  x + time_bias
-            return x
-
         for i, conv_block in enumerate(self.encoder_convs):
-            for j, conv in enumerate(conv_block):
-                x = conv(x)
-                x = add_encoder_time(x, i, j)
-                x = self.activation_fn(x)
+            for conv in conv_block:
+                x = self.activation_fn(conv(x))
 
             if i < last_encoder:
                 skips.append(x)
@@ -171,9 +102,7 @@ class UNet(nn.Module):
             x = self.upsample(x)
             x = torch.cat([x, skips.pop()], dim=1)
 
-            for j, conv in enumerate(conv_block):
-                x = conv(x)
-                x = add_decoder_time(x, i, j)
-                x = self.activation_fn(x)
+            for conv in conv_block:
+                x = self.activation_fn(conv(x))
 
         return self.output_conv(x)

@@ -39,7 +39,8 @@ def generate_image(unet, scheduler: NoiseScheduler, stochasticity=1.0, n_images=
             alpha_bar = scheduler.alpha_bar(t)
             sigma_t   = stochasticity * torch.sqrt(scheduler.beta(t))
 
-            noise_pred = unet(x)
+            t_batch = torch.full((n_images,), t, device=device, dtype=torch.long)
+            noise_pred = unet(x, t_batch)
             x = (1 / torch.sqrt(alpha)) * (
                 x - (1 - alpha) / torch.sqrt(1 - alpha_bar) * noise_pred
             ) + sigma_t * z
