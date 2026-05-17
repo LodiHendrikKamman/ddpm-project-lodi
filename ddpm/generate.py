@@ -10,7 +10,7 @@ def noisy_image(n=1, img_shape=(28, 28)):
 
 
 def generate_image(unet, scheduler: NoiseScheduler, stochasticity=1.0, n_images=1,
-                   return_intermediates=False):
+                   return_intermediates=False, use_time=True):
     """
     Runs the full reverse diffusion chain and returns the denoised image tensor.
 
@@ -40,7 +40,8 @@ def generate_image(unet, scheduler: NoiseScheduler, stochasticity=1.0, n_images=
             sigma_t   = stochasticity * torch.sqrt(scheduler.beta(t))
 
             t_batch = torch.full((n_images,), t, device=device, dtype=torch.long)
-            noise_pred = unet(x, t_batch)
+            noise_pred = unet(x, t_batch)  if use_time else unet(x, None)
+
             x = (1 / torch.sqrt(alpha)) * (
                 x - (1 - alpha) / torch.sqrt(1 - alpha_bar) * noise_pred
             ) + sigma_t * z

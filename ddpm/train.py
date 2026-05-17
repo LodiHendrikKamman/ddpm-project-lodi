@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def find_lr(model, train_loader, start_lr=1e-7, end_lr=1, num_iter=100):
+def find_lr(model, train_loader, start_lr=1e-7, end_lr=1, num_iter=100,use_time=True):
     model = model.to(device)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=start_lr)
@@ -25,7 +25,7 @@ def find_lr(model, train_loader, start_lr=1e-7, end_lr=1, num_iter=100):
             batch = next(data_iter)
 
         x_noisy, noise = batch[0].to(device), batch[1].to(device)
-        t = batch[2].to(device) if len(batch) == 3 else None
+        t = batch[2].to(device) if use_time  else None
 
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
@@ -83,7 +83,7 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
         epoch_train_loss = 0
         for batch in tqdm(train_loader, leave=False, desc='train'):
             x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
-                                 batch[2].to(device) if use_time and len(batch) == 3 else None,)
+                                 batch[2].to(device) if use_time else None,)
 
             with torch.amp.autocast('cuda'):
                 noise_pred = model(x_noisy, t)
@@ -104,7 +104,7 @@ def train(model, train_loader, test_loader, epochs=100, lr=1e-2, weight_decay=1e
         with torch.no_grad():
             for batch in tqdm(test_loader, leave=False, desc='test'):
                 x_noisy, noise, t = (batch[0].to(device), batch[1].to(device),
-                                 batch[2].to(device) if use_time and len(batch) == 3 else None,)
+                                 batch[2].to(device) if use_time else None,)
                 with torch.amp.autocast('cuda'):
                     noise_pred = model(x_noisy,t)
                     epoch_test_loss += loss_fn(noise_pred, noise).item()
