@@ -106,6 +106,11 @@ class UNet(nn.Module):
             ])
             for conv_block in self.decoder_convs
         ])
+        
+        for proj_group in list(self.encoder_time_projs) + list(self.decoder_time_projs):
+            for proj in proj_group:
+                torch.nn.init.zeros_(proj.weight)
+                torch.nn.init.zeros_(proj.bias)
 
         #attention
         bottleneck_channels = full_channels[self.mid]
